@@ -1,0 +1,185 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: Personal-account reconstruction of the AWS Serverless Agentic AI workshop Module 1 foundation
+
+Resources:
+
+  ChoreographyEventBus:
+    Type: AWS::Events::EventBus
+    Properties:
+      Name: !Sub '${AWS::StackName}-choreography'
+
+  AgentExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub '${AWS::StackName}-lambda-execution-role'
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: LambdaBasicExecution
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - logs:CreateLogGroup
+                  - logs:CreateLogStream
+                  - logs:PutLogEvents
+                  - events:PutEvents
+                  - s3:GetObject
+                  - s3:PutObject
+                  - s3:DeleteObject
+                Resource: '*'
+
+  SessionBucket:
+    Type: AWS::S3::Bucket
+    DeletionPolicy: Delete
+    UpdateReplacePolicy: Delete
+
+  PlannerFunction:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: !Sub '${AWS::StackName}-planner-agent'
+      Runtime: python3.12
+      Handler: index.handler
+      Role: !GetAtt AgentExecutionRole.Arn
+      Timeout: 30
+      MemorySize: 256
+      Environment:
+        Variables:
+          EVENT_BUS_NAME: !Ref ChoreographyEventBus
+          SESSION_BUCKET: !Ref SessionBucket
+      Code:
+        ZipFile: |
+          import json
+          import os
+          import boto3
+
+          events = boto3.client("events")
+
+          def handler(event, context):
+              detail = event.get("detail", event)
+              booking_id = detail.get("bookingID") or detail.get("booking_id") or "unknown"
+
+              result = {
+                  "bookingID": booking_id,
+                  "travel_dates": detail.get("travel_dates", {}),
+                  "origin": detail.get("origin"),
+                  "destination": detail.get("destination"),
+                  "travelers": detail.get("travelers"),
+                  "budget": detail.get("budget")
+              }
+
+              events.put_events(Entries=[{
+                  "Source": "workshop.planner-agent",
+                  "DetailType": "DatesFinalized",
+                  "Detail": json.dumps(result),
+                  "EventBusName": os.environ["EVENT_BUS_NAME"]
+              }])
+
+              return result
+
+  WeatherFunction:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: !Sub '${AWS::StackName}-weather-agent'
+      Runtime: python3.12
+      Handler: index.handler
+      Role: !GetAtt AgentExecutionRole.Arn
+      Timeout: 30
+      MemorySize: 256
+      Environment:
+        Variables:
+          EVENT_BUS_NAME: !Ref ChoreographyEventBus
+          SESSION_BUCKET: !Ref SessionBucket
+      Code:
+        ZipFile: |
+          import json
+          import os
+          import boto3
+
+          events = boto3.client("events")
+
+          def handler(event, context):
+              detail = event.get("detail", event)
+              booking_id = detail.get("bookingID") or detail.get("booking_id") or "unknown"
+
+              result = {
+                  "bookingID": booking_id,
+                  "risk": "high" if detail.get("destination") == "Miami" else "low",
+                  "forecast": "Workshop sample forecast",
+                  "recommendation": "Review weather conditions before finalizing."
+              }
+
+              events.put_events(Entries=[{
+                  "Source": "workshop.weather-agent",
+                  "DetailType": "WeatherAnalysisCompleted",
+                  "Detail": json.dumps(result),
+                  "EventBusName": os.environ["EVENT_BUS_NAME"]
+              }])
+
+              return result
+
+  FlightManagerFunction:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: !Sub '${AWS::StackName}-flight-manager-agent'
+      Runtime: python3.12
+      Handler: index.handler
+      Role: !GetAtt AgentExecutionRole.Arn
+      Timeout: 30
+      MemorySize: 256
+      Environment:
+        Variables:
+          EVENT_BUS_NAME: !Ref ChoreographyEventBus
+          SESSION_BUCKET: !Ref SessionBucket
+      Code:
+        ZipFile: |
+          import json
+          import os
+          import boto3
+
+          events = boto3.client("events")
+
+          def handler(event, context):
+              detail = event.get("detail", event)
+              booking_id = detail.get("bookingID") or detail.get("booking_id") or "unknown"
+
+              result = {
+                  "bookingID": booking_id,
+                  "options": [{
+                      "airline": detail.get("airline_preference", "Any"),
+                      "price": detail.get("budget", 0)
+                  }],
+                  "availability": "available"
+              }
+
+              events.put_events(Entries=[{
+                  "Source": "workshop.flight-manager-agent",
+                  "DetailType": "FlightSearchCompleted",
+                  "Detail": json.dumps(result),
+                  "EventBusName": os.environ["EVENT_BUS_NAME"]
+              }])
+
+              return result
+
+Outputs:
+
+  ChoreographyEventBusName:
+    Value: !Ref ChoreographyEventBus
+
+  SessionBucketName:
+    Value: !Ref SessionBucket
+
+  PlannerFunctionArn:
+    Value: !GetAtt PlannerFunction.Arn
+
+  WeatherFunctionArn:
+    Value: !GetAtt WeatherFunction.Arn
+
+  FlightManagerFunctionArn:
+    Value: !GetAtt FlightManagerFunction.Arn
