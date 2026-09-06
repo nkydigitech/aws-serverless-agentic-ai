@@ -1,0 +1,108 @@
+{
+  "AWSTemplateFormatVersion": "2010-09-09",
+  "Description": "Module 2 - Orchestration Foundation",
+  "Resources": {
+    "SessionBucket": {
+      "Type": "AWS::S3::Bucket",
+      "Properties": {
+        "VersioningConfiguration": {"Status": "Enabled"}
+      }
+    },
+    "SharedAgentExecutionRole": {
+      "Type": "AWS::IAM::Role",
+      "Properties": {
+        "RoleName": {"Fn::Sub": "${AWS::StackName}-shared-agent-execution-role"},
+        "AssumeRolePolicyDocument": {
+          "Version": "2012-10-17",
+          "Statement": [{"Effect": "Allow", "Principal": {"Service": "lambda.amazonaws.com"}, "Action": "sts:AssumeRole"}]
+        },
+        "ManagedPolicyArns": ["arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole"],
+        "Policies": [{
+          "PolicyName": "AgentS3Access",
+          "PolicyDocument": {
+            "Version": "2012-10-17",
+            "Statement": [{
+              "Effect": "Allow",
+              "Action": ["s3:GetObject", "s3:PutObject", "s3:ListBucket"],
+              "Resource": [{"Fn::GetAtt": ["SessionBucket", "Arn"]}, {"Fn::Sub": "${SessionBucket.Arn}/*"}]
+            }]
+          }
+        }]
+      }
+    },
+    "StepFunctionsExecutionRole": {
+      "Type": "AWS::IAM::Role",
+      "Properties": {
+        "RoleName": {"Fn::Sub": "${AWS::StackName}-stepfunctions-execution-role"},
+        "AssumeRolePolicyDocument": {
+          "Version": "2012-10-17",
+          "Statement": [{"Effect": "Allow", "Principal": {"Service": "states.amazonaws.com"}, "Action": "sts:AssumeRole"}]
+        },
+        "Policies": [{
+          "PolicyName": "StepFunctionsLambdaAccess",
+          "PolicyDocument": {
+            "Version": "2012-10-17",
+            "Statement": [
+              {"Effect": "Allow", "Action": ["lambda:InvokeFunction"], "Resource": {"Fn::Sub": "arn:aws:lambda:${AWS::Region}:${AWS::AccountId}:function:${AWS::StackName}-*"}},
+              {"Effect": "Allow", "Action": ["states:SendTaskSuccess", "states:SendTaskFailure", "states:SendTaskHeartbeat"], "Resource": "*"},
+              {"Effect": "Allow", "Action": ["logs:CreateLogGroup", "logs:CreateLogStream", "logs:PutLogEvents"], "Resource": "*"}
+            ]
+          }
+        }]
+      }
+    },
+    "HumanReviewActivity": {
+      "Type": "AWS::StepFunctions::Activity",
+      "Properties": {
+        "Name": {"Fn::Sub": "${AWS::StackName}-human-review-activity"}
+      }
+    },
+    "OrchPlannerAgent": {
+      "Type": "AWS::Lambda::Function",
+      "Properties": {
+        "FunctionName": {"Fn::Sub": "${AWS::StackName}-orch-planner-agent"},
+        "Runtime": "python3.12",
+        "Handler": "index.lambda_handler",
+        "Role": {"Fn::GetAtt": ["SharedAgentExecutionRole", "Arn"]},
+        "Timeout": 60,
+        "MemorySize": 512,
+        "Code": {
+          "ZipFile": "import json\ndef lambda_handler(event, context):\n print(event)\n if 'origin' in event:\n return {'bookingID': event.get('bookingID'), 'validated': True, 'origin': event.get('origin'), 'destination': event.get('destination'), 'travel_dates': event.get('travel_dates'), 'budget': event.get('budget', 1000)}\n if 'parallelResults' in event:\n budget = event.get('plannerExtractResult', {}).get('budget', 1000)\n if budget < 900:\n return {'decision': 'needs_human_review', 'reason': 'HIGH_BUDGET_RISK', 'risk_score': 85}\n return {'decision': 'booked'}\n if 'humanDecision' in event:\n return {'decision': 'booked', 'final_status': 'confirmed', 'human_approval': event.get('humanDecision')}\n return {'decision': 'booked'}\n"
+        }
+      }
+    },
+    "OrchWeatherAgent": {
+      "Type": "AWS::Lambda::Function",
+      "Properties": {
+        "FunctionName": {"Fn::Sub": "${AWS::StackName}-orch-weather-agent"},
+        "Runtime": "python3.12",
+        "Handler": "index.lambda_handler",
+        "Role": {"Fn::GetAtt": ["SharedAgentExecutionRole", "Arn"]},
+        "Timeout": 60,
+        "Code": {
+          "ZipFile": "import json\ndef lambda_handler(event, context):\n return {'bookingID': event.get('bookingID'), 'weather': 'Thunderstorms', 'risk': 'HIGH'}\n"
+        }
+      }
+    },
+    "OrchFlightManagerAgent": {
+      "Type": "AWS::Lambda::Function",
+      "Properties": {
+        "FunctionName": {"Fn::Sub": "${AWS::StackName}-orch-flight-manager-agent"},
+        "Runtime": "python3.12",
+        "Handler": "index.lambda_handler",
+        "Role": {"Fn::GetAtt": ["SharedAgentExecutionRole", "Arn"]},
+        "Timeout": 60,
+        "Code": {
+          "ZipFile": "import json\ndef lambda_handler(event, context):\n return {'bookingID': event.get('bookingID'), 'flights': [{'airline': 'American', 'price': 450}]}\n"
+        }
+      }
+    }
+  },
+  "Outputs": {
+    "OrchPlannerFunctionArn": {"Value": {"Fn::GetAtt": ["OrchPlannerAgent", "Arn"]}},
+    "OrchWeatherFunctionArn": {"Value": {"Fn::GetAtt": ["OrchWeatherAgent", "Arn"]}},
+    "OrchFlightFunctionArn": {"Value": {"Fn::GetAtt": ["OrchFlightManagerAgent", "Arn"]}},
+    "HumanReviewActivityArn": {"Value": {"Ref": "HumanReviewActivity"}},
+    "StepFunctionsExecutionRoleArn": {"Value": {"Fn::GetAtt": ["StepFunctionsExecutionRole", "Arn"]}}
+  }
+}

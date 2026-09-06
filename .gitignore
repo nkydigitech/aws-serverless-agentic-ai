@@ -1,0 +1,6 @@
+token.json
+last-exec-arn.txt
+token.json
+last-exec-arn.txt
+**/token.json
+**/last-exec-arn.txt

@@ -1,0 +1,68 @@
+{
+  "Comment": "Module 2 - Travel Booking Orchestration - Parallel + Human Review",
+  "StartAt": "PlannerExtract",
+  "States": {
+    "PlannerExtract": {
+      "Type": "Task",
+      "Resource": "${ORCH_PLANNER_ARN}",
+      "ResultPath": "$.plannerExtractResult",
+      "Next": "ParallelWeatherAndFlight"
+    },
+    "ParallelWeatherAndFlight": {
+      "Type": "Parallel",
+      "Branches": [
+        {
+          "StartAt": "WeatherGet",
+          "States": {
+            "WeatherGet": {
+              "Type": "Task",
+              "Resource": "${ORCH_WEATHER_ARN}",
+              "End": true
+            }
+          }
+        },
+        {
+          "StartAt": "FlightSearch",
+          "States": {
+            "FlightSearch": {
+              "Type": "Task",
+              "Resource": "${ORCH_FLIGHT_ARN}",
+              "End": true
+            }
+          }
+        }
+      ],
+      "ResultPath": "$.parallelResults",
+      "Next": "PlannerAnalyzeAndBook"
+    },
+    "PlannerAnalyzeAndBook": {
+      "Type": "Task",
+      "Resource": "${ORCH_PLANNER_ARN}",
+      "ResultPath": "$.analysisResult",
+      "Next": "IsHumanReviewNeeded"
+    },
+    "IsHumanReviewNeeded": {
+      "Type": "Choice",
+      "Choices": [
+        {
+          "Variable": "$.analysisResult.decision",
+          "StringEquals": "needs_human_review",
+          "Next": "HumanReview"
+        }
+      ],
+      "Default": "PlannerFinalizeBooking"
+    },
+    "HumanReview": {
+      "Type": "Task",
+      "Resource": "${ACTIVITY_ARN}",
+      "HeartbeatSeconds": 300,
+      "ResultPath": "$.humanDecision",
+      "Next": "PlannerFinalizeBooking"
+    },
+    "PlannerFinalizeBooking": {
+      "Type": "Task",
+      "Resource": "${ORCH_PLANNER_ARN}",
+      "End": true
+    }
+  }
+}
